@@ -2,17 +2,29 @@
 
 use strict;
 use warnings;
+use Data::Dumper;
 use Text::Balanced qw(extract_multiple extract_delimited extract_bracketed);
 
-# our $braces_re;
-# $braces_re = qr{{(?:(?>[^{}]+)|(??{$braces_re}))*}};
 
-# for each element that i want to pull from the data chunk, iterate
-# through it again to see if there's anything that's assocaited with a
-# nested 'word {' combination.  if there's nothing nested then pull out.
+my %term_fields = (
+                   "destination-address"  => "",
+                   "source-address"       => "",
+                   # "from"                 => "",
+                   "then"                 => "",
+                  );
+
+my %term_atoms = (
+                   "protocol"             => "",
+                   "destination-port"     => "",
+                   "source-port"          => "",
+                   "forwarding-class"     => "",
+                   "count"                => "",
+                   "accept"               => "",
+                   "tcp-established"      => "",
+                  );
+
 
 my @terms = (); # stick all of the fw filter terms we run into in here.
-
 
 my $term_cap  = 0;  # flag for capturing terms
 my $term_name = ""; # key for the term
@@ -21,59 +33,76 @@ my $term      = {}; # anonymous hash for pushing into @terms
 open(ACL, $ARGV[0]) || die "error opening: $ARGV[0]";
 while (<ACL>) {
   if (( /term (\w\S+)\s+\{/i ) && ($term_cap == 0)) {
-    ## print "-- init: " . $_ . "\n\n";
     # this is the first term we're running into
     $term_cap          = 1; # start capturing
     $term_name         = $1;
-    ## print "term name: $term_name\n";
 
   } elsif (( /term (\w\S+)\s+\{/ ) && ($term_cap == 1)) {
     # we've bumped up against this is the next term for this filter the
     # order of operations is important here
     push @terms, $term;
     $term = {};                            # reset this value
-    ## print "nested: " . $_;
 
     $term_name = $1;
-    ## print "term name: $term_name\n";
-
   }
 
   if ($term_cap == 1) {
     $term->{$term_name} .= $_;
-    ## print "termval: ", $_;
   }
 }
-push @terms, $term;  # do cleanup
+push @terms, $term;              # do cleanup prior to closing the file.
 close(ACL);
 
-foreach my $i (0 .. $#terms) {
+
+
+foreach my $i (0 .. $#terms) {  # handle in order
   foreach my $j (keys %{ $terms[$i] } ) {
     print "term name: $j\n";
-    &parseAclTerm($j, $terms[$i]{$j} );
+    my $acl = &parseAclTerm($j, $terms[$i]{$j} );
+    print Dumper $acl;
   }
 
 }
-
-
 
 sub parseAclTerm () {
   my ($name, $content) = @_;
-
   my $parse_flag = 0;
 
-  # recurse through these
+  my $acl = {};    # initialize anonymous for return value
+
+
   while ($parse_flag == 0) {
     my ($pref, $val, $rem) = &get_bracketed($content);
-    # print "-- $val\n";
+    $parse_flag = 1 if ($val eq "" && $rem eq "");
+    $content = $val . $rem; # does this make sense?
 
-    print "   prefix: $pref\n";
-    print "    value: $val\n";
-    print "remainder: $rem\n";
+    next if $pref =~ /$name/i; # skip the filter term name
+    # next if $pref =~ /from/i;  #
 
-    $content = $val;
-    $parse_flag = 1 if $val eq "";
+    # some fields get stranded in a strictly nested parsing model
+    # break these out separately - specifically in the from{} portion of the config
+    if ($pref =~ /from/i) {
+      # iterate through $val for matches
+      # c - continue
+      # i - case insensitive
+      # g - global
+      while ( $val =~ /\b([\-\w]+)\s+(.+)\;/gci ) {
+        if (exists $term_atoms{$1} ) {
+          $acl->{$name}{$1} = $2;
+        } else {
+          next if $2 =~ /except/;  # junos' "except" is a slick, except for here
+          print "error: new atom ($1 - $2)\n";
+        }
+      }
+    }
+
+    if ( exists $term_fields{$pref} ) {
+      $val =~ s/\{|\}//g;
+      $acl->{$name}{$pref} = $val;
+    }
   }
+
+  return $acl;
 }
 
 
@@ -97,6 +126,5 @@ sub get_bracketed {
 
   # return the whole match
   return($prefix, $content, $remainder);
-  #return $content;
 
 }
