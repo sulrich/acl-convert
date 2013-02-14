@@ -1,25 +1,23 @@
 #!/usr/bin/env perl
 
-
 # steve ulrich <sulrich@cisco.com>
 #
-# script to conver a junos filter to an ios-xr object-group notation
+# script to convert a junos filter to an ios-xr object-group notation
 # style ACL.  i'm sure stuff's broke in here.
 
 #use strict;
 #use warnings;
 use Getopt::Long;
-
 use Text::Balanced qw( extract_bracketed );
 
 
-
-
 my %term_fields = (             # bracketed term fields
-                   "destination-address"  => "",
-                   "source-address"       => "",
-                   # "from"               => "",
-                   "then"                 => "",
+                   "destination-address"     => "",
+                   "source-address"          => "",
+                   "source-prefix-list"      => "", # a predefined local objects
+                   "destination-prefix-list" => "", # a predefined local objects
+                   # "from"                  => "",
+                   "then"                    => "",
                   );
 
 my %term_atoms = (              # these are field terms we attempt to do
@@ -34,23 +32,26 @@ my %term_atoms = (              # these are field terms we attempt to do
                    "packet-length"    => "",
                    "icmp-type"        => "",
                    "fragment-offset"  => "",
+                   "policer"          => "",
                   );
 
 my $filter_name = "test"; # can be overriden from the cmd line
 
-my @terms       = (); # all of the fw filter terms go in here.
-my $term        = {}; # anonymous hash for pushing into @terms
-my $term_cap    = 0;  # flag for capturing terms
-my $term_name   = ""; # key for the term
-my $c_net_obj   = "";
-my $c_port_obj  = "";
-my $c_acl_obj   = "";
-my $acl_inc     = 10; # amount to increment ACL line #s by
+my @terms      = (); # all of the fw filter terms go in here.
+my $term       = {}; # anonymous hash for pushing into @terms
+my $term_cap   = 0;  # flag for capturing terms
+my $term_name  = ""; # key for the term
+my $acl_inc    = 10; # amount to increment ACL line #s by
+my $o_net_objs = "";
+my $o_port_obj = "";
+my $o_acl      = "";  # the actual output
 
 &GetOptions('f=s' => \$filter_name );
 
-
-
+if (!$ARGV[0]) {
+  &printUsage;
+  exit(1);
+}
 
 # standard format for the translated objects is:
 #
@@ -87,8 +88,8 @@ while (<ACL>) {
 push @terms, $term;              # cleanup prior to closing the file.
 close(ACL);
 
-my ( $o_net_objs, $o_port_objs, $o_acl ) = "";  # the actual output
-
+# iterate through the various terms we've pulled in and assemble the ACL
+# ==============================================================================
 foreach my $i (0 .. $#terms) {       # handle terms in order
   foreach my $j (keys %{ $terms[$i] } ) {
     my $acl_struct               = &parseAclTerm( $j, $terms[$i]{$j} );
@@ -100,26 +101,17 @@ foreach my $i (0 .. $#terms) {       # handle terms in order
   }
 }
 
-$o_acl = &number_acl($o_acl);
+$o_acl = &number_acl($o_acl); # add line numbers
+
+# iterate through the various terms we've pulled in and assemble the ACL
+# ==============================================================================
 print $o_net_objs;
 print $o_port_objs;
 print "ipv4 access-list $filter_name\n" . $o_acl . "!\n";
 
-sub number_acl {
-  my ($acl) = @_;
-  my $o = "";
 
-  my $lnum = $acl_inc;
 
-  my @lines = split (/\n/, $acl);
-  foreach my $l (@lines) {
-    $o .= "  $lnum $l\n";
-    $lnum = $lnum + $acl_inc
-  }
-
-  return $o;
-};
-
+# processTerm
 
 sub processTerm {
   my ($aclname, $aclref) = @_;
@@ -129,8 +121,8 @@ sub processTerm {
       $dst_addr, $dst_ports,
       $action, $counter) = "";
 
-  my @protocols      = ('ip');
-  my $netobj_prefix  = "object-group network ipv4";
+  my @protocols      = ();
+  my $netobj_prefix  = "object-group network ipv4 ";
   my $portobj_prefix = "object-group port ";
   my $src_net        = "$aclname-SRC";
   my $dst_net        = "$aclname-DST";
@@ -179,6 +171,8 @@ sub processTerm {
 }
 
 
+# parseProtocol - returns an array of protocols for the caller to
+# iterate through when building the acl.
 sub parseProtocol {
   my ($str) = @_;
   $str =~ s/\[|\]|\;//g; # rip off the chrome
@@ -189,6 +183,8 @@ sub parseProtocol {
   return @protocols;
 }
 
+# parsePortBlock - returns the body of a port object-group creates range
+# and eq statements as necessary.
 sub parsePortBlock {
   my ($str) = @_;
   $str =~ s/\[|\]|\;//g; # rip off the chrome
@@ -211,7 +207,13 @@ sub parsePortBlock {
 }
 
 
-# generically manipulate junos prefix lists
+# parseAddrBlock - returns the body of a network object-group statement.
+# it doesn't do anything particularly clever wrt the juniper 'except'
+# statements.
+#
+# XXX - what to do about the except operations?  does it make sense to
+# parse these and optimize them within the context of the network
+# object-group?
 sub parseAddrBlock {
   my ($addrs) = @_;
   my $block = "";
@@ -230,7 +232,11 @@ sub parseAddrBlock {
   return $block;
 }
 
-# parse the 'then' component of the junos term - there's room for a lot more thought here
+# parse the 'then' component of the junos term - there's room for a lot
+# more thought here - right now it just tells us whether to permit/deny
+# the statement.
+#
+# XXX - i need to add more handling for counters, forwarding class, etc.
 sub parseAction {
   my ($actions) = @_;
   my $act = "permit";
@@ -278,7 +284,7 @@ sub parseAclTerm {
           $acl->{$name}{$1} = $2;
         } else {
           next if $2 =~ /except/;  # junos' "except" is a slick, except for here
-          print "!! error: new atom ($1 - $2)\n";
+          print "!! ERROR: new atom ($1 - $2)\n";
         }
       }
     }
@@ -291,7 +297,8 @@ sub parseAclTerm {
   return $acl;
 }
 
-
+# get_bracketed - this is mostly wrapper around the Text::Balanced stuff
+# to faciltate recursing through the ACL term contents.
 sub get_bracketed {
   my ($str) = @_;
   my ($prefix, $content, $remainder) = "";
@@ -308,4 +315,36 @@ sub get_bracketed {
 
   return($prefix, $content, $remainder);
 
+}
+
+# stick line numbers on the front of the ACL.
+sub number_acl {
+  my ($acl) = @_;
+  my $o = "";
+  my $lnum = $acl_inc;
+
+  my @lines = split (/\n/, $acl);
+  foreach my $l (@lines) {
+    $o .= "  $lnum $l\n";
+    $lnum = $lnum + $acl_inc
+  }
+  return $o;
+};
+
+# dump a usage message to the user
+sub printUsage {
+  my ($mesg) = @_;
+
+  print STDERR <<EOF;
+
+filter-conv.pl [-f filter_name] input_file_path
+
+options
+ -f specify a filter name
+
+error:
+ $mesg
+EOF
+
+  return;
 }
