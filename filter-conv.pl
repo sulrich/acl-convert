@@ -111,8 +111,12 @@ print "ipv4 access-list $filter_name\n" . $o_acl . "!\n";
 
 
 
-# processTerm
-
+# processTerm - iterates through the ACL structure passed to it and
+# assembles the associated objects which are concatenated by the caller
+# into the larger configuration assembly.
+#
+# this will need more attention as more capabilities in terms of
+# translation are added.
 sub processTerm {
   my ($aclname, $aclref) = @_;
 
