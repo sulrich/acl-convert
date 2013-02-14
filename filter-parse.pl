@@ -6,11 +6,11 @@
 # script to conver a junos filter to an ios-xr object-group notation
 # style ACL.  i'm sure stuff's broke in here.
 
-use strict;
-use warnings;
-use Data::Dumper;
+#use strict;
+#use warnings;
 use Getopt::Long;
-use Text::Balanced qw(extract_multiple extract_delimited extract_bracketed);
+
+use Text::Balanced qw( extract_bracketed );
 
 
 
@@ -32,18 +32,24 @@ my %term_atoms = (              # these are field terms we attempt to do
                    "accept"           => "",
                    "tcp-established"  => "",
                    "packet-length"    => "",
+                   "icmp-type"        => "",
+                   "fragment-offset"  => "",
                   );
 
+my $filter_name = "test"; # can be overriden from the cmd line
 
 my @terms       = (); # all of the fw filter terms go in here.
 my $term        = {}; # anonymous hash for pushing into @terms
 my $term_cap    = 0;  # flag for capturing terms
 my $term_name   = ""; # key for the term
-my $filter_name = "test"; # can be overriden from the cmd line
 my $c_net_obj   = "";
 my $c_port_obj  = "";
 my $c_acl_obj   = "";
 my $acl_inc     = 10; # amount to increment ACL line #s by
+
+&GetOptions('f=s' => \$filter_name );
+
+
 
 
 # standard format for the translated objects is:
