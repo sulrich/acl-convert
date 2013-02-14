@@ -9,7 +9,10 @@
 use strict;
 use warnings;
 use Data::Dumper;
+use Getopt::Long;
 use Text::Balanced qw(extract_multiple extract_delimited extract_bracketed);
+
+
 
 
 my %term_fields = (             # bracketed term fields
@@ -36,11 +39,11 @@ my @terms       = (); # all of the fw filter terms go in here.
 my $term        = {}; # anonymous hash for pushing into @terms
 my $term_cap    = 0;  # flag for capturing terms
 my $term_name   = ""; # key for the term
-my $filter_name = "";
+my $filter_name = "test"; # can be overriden from the cmd line
 my $c_net_obj   = "";
 my $c_port_obj  = "";
 my $c_acl_obj   = "";
-my $acl_incr    = 10; # amount to increment ACL line #s by
+my $acl_inc     = 10; # amount to increment ACL line #s by
 
 
 # standard format for the translated objects is:
@@ -53,14 +56,13 @@ my $acl_incr    = 10; # amount to increment ACL line #s by
 open(ACL, $ARGV[0]) || die "error opening: $ARGV[0]";
 while (<ACL>) {
   if (/filter (\w\S+)\s+\{/i) {
-    $filter_name = $1;               # we happen to have this in the file,
+    $filter_name = $1;            # we happen to have this in the file,
                                   # use it to name the acl
   }
 
-
   if (( /term (\w\S+)\s+\{/i ) && ($term_cap == 0)) {
     # this is the first term we're running into
-    $term_cap  = 1;                          # start capturing
+    $term_cap  = 1;                   # start capturing
     $term_name = $1;
 
   } elsif (( /term (\w\S+)\s+\{/ ) && ($term_cap == 1)) {
@@ -79,18 +81,38 @@ while (<ACL>) {
 push @terms, $term;              # cleanup prior to closing the file.
 close(ACL);
 
-
+my ( $o_net_objs, $o_port_objs, $o_acl ) = "";  # the actual output
 
 foreach my $i (0 .. $#terms) {       # handle terms in order
   foreach my $j (keys %{ $terms[$i] } ) {
-    my $acl = &parseAclTerm( $j, $terms[$i]{$j} );
+    my $acl_struct               = &parseAclTerm( $j, $terms[$i]{$j} );
+    my ($netobj, $portobj, $acl) = &processTerm( $j, $acl_struct );
 
-    my ($netobj, $portobj, $acl) = &processTerm($j, $acl);
-
-
-
+    $o_net_objs  .= $netobj;
+    $o_port_objs .= $portobj;
+    $o_acl       .= $acl;
   }
 }
+
+$o_acl = &number_acl($o_acl);
+print $o_net_objs;
+print $o_port_objs;
+print "ipv4 access-list $filter_name\n" . $o_acl . "!\n";
+
+sub number_acl {
+  my ($acl) = @_;
+  my $o = "";
+
+  my $lnum = $acl_inc;
+
+  my @lines = split (/\n/, $acl);
+  foreach my $l (@lines) {
+    $o .= "  $lnum $l\n";
+    $lnum = $lnum + $acl_inc
+  }
+
+  return $o;
+};
 
 
 sub processTerm {
@@ -113,12 +135,12 @@ sub processTerm {
 
     if ($field  =~ /destination-address/i ) {
       my $dst_addr_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
-      $netobj .= $netobj_prefix . "$dst_net\n" . $dst_addr_block . "\n";
+      $netobj .= $netobj_prefix . "$dst_net\n" . $dst_addr_block . "!\n";
     }
 
     elsif ($field  =~ /source-address/i ) {
       my $src_addr_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
-      $netobj .= $netobj_prefix . "$src_net\n" . $src_addr_block . "\n";
+      $netobj .= $netobj_prefix . "$src_net\n" . $src_addr_block . "!\n";
     }
 
     elsif ($field  =~ /protocol/i ) {
@@ -127,12 +149,12 @@ sub processTerm {
 
     elsif ($field  =~ /source-port/i )         {
       $src_ports = &parsePortBlock( $aclref->{$aclname}->{$field} );
-      $portobj .= $portobj_prefix . $aclname . "-SRC\n" . $src_ports . "\n";
+      $portobj .= $portobj_prefix . $aclname . "-SRC\n" . $src_ports . "!\n";
     }
 
     elsif ($field  =~ /destination-port/i )    {
       $dst_ports = &parsePortBlock( $aclref->{$aclname}->{$field} );
-      $portobj .= $portobj_prefix . $aclname . "-DST\n" . $dst_ports . "\n";
+      $portobj .= $portobj_prefix . $aclname . "-DST\n" . $dst_ports . "!\n";
     }
     elsif ($field  =~ /then/i ) {
       $action = &parseAction( $aclref->{$aclname}->{$field} );
@@ -147,14 +169,13 @@ sub processTerm {
 
     $acl .= "$action $prot net-group $src_net $s_p net-group $dst_net $d_p" . "\n";
   }
-
   return ($netobj, $portobj, $acl);
 }
 
 
 sub parseProtocol {
   my ($str) = @_;
-  $str =~ s/\[|\]|\;//g; # rip off the brackets
+  $str =~ s/\[|\]|\;//g; # rip off the chrome
   $str =~ s/^\s+//g;
   $str =~ s/\s+$//g;     # cleanup whitespace
 
@@ -164,7 +185,7 @@ sub parseProtocol {
 
 sub parsePortBlock {
   my ($str) = @_;
-  $str =~ s/\[|\]|\;//g; # rip off the brackets
+  $str =~ s/\[|\]|\;//g; # rip off the chrome
   $str =~ s/^\s+//g;
   $str =~ s/\s+$//g;     # cleanup whitespace
 
@@ -197,7 +218,7 @@ sub parseAddrBlock {
     $pref =~ s/\;//g;
     next if ($pref eq "");
 
-    $pref   = "  !! $pref" if ( /except/i); # oh what to do about exceptions...?
+    $pref   = "!! $pref" if ( $pref =~ /except/i ); # oh what to do about exceptions...?
     $block .= "  $pref\n";
   }
   return $block;
@@ -267,14 +288,14 @@ sub parseAclTerm {
 
 sub get_bracketed {
   my ($str) = @_;
-
+  my ($prefix, $content, $remainder) = "";
   # seek to beginning of bracket
   return undef unless $str =~ /(\S+)\s+(?={)/gc;
 
-  my $prefix = $1;
+  $prefix = $1;
 
   # get everything from the start brace to the matching end brace
-  my ($content, $remainder) = extract_bracketed( $str, '{}');
+  ($content, $remainder) = extract_bracketed( $str, '{}');
 
   # no closing brace found
   return undef unless $content;
