@@ -1,12 +1,10 @@
 #!/usr/bin/env perl
 
-# steve ulrich <sulrich@cisco.com>
+# steve ulrich <sulrich@cisco.com> - 12-feb, 2013
 #
 # script to convert a junos filter to an ios-xr object-group notation
 # style ACL.  i'm sure stuff's broke in here.
 
-#use strict;
-#use warnings;
 use Getopt::Long;
 use Text::Balanced qw( extract_bracketed );
 
@@ -14,8 +12,8 @@ use Text::Balanced qw( extract_bracketed );
 my %term_fields = (             # bracketed term fields
                    "destination-address"     => "",
                    "source-address"          => "",
-                   "source-prefix-list"      => "", # a predefined local objects
-                   "destination-prefix-list" => "", # a predefined local objects
+                   "source-prefix-list"      => "", # a predefined local objects we need these
+                   "destination-prefix-list" => "", # a predefined local objects we need these
                    # "from"                  => "",
                    "then"                    => "",
                   );
