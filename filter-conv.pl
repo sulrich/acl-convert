@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# steve ulrich <sulrich@cisco.com> - 12-feb, 2013
+# steve ulrich <sulrich@<botwerks.org> - 12-feb, 2013
 #
 # script to convert a junos filter to an ios-xr object-group notation
 # style ACL.  i'm sure stuff's broke in here.
