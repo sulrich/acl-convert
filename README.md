@@ -11,5 +11,7 @@ juniper has the notion of an ACL ```except``` keyword which allows you to pull a
 
 i just ran across a few ```then``` term anomalies in the original config which the parser doesn't barf on, but are dependent on some additional capabilities (internal objects) which are not incorporated into IOS XR.  these might generate incorrect entries in the final ACL.
 
-## unknown atom
+## unknown atoms
+
+there are a number of keywords that this doesn't understand.  it will barf an error if it runs across an atom that it doesn't understand.
 .
