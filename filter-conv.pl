@@ -12,8 +12,8 @@ use Text::Balanced qw( extract_bracketed );
 my %term_fields = (             # bracketed term fields
                    "destination-address"     => "",
                    "source-address"          => "",
-                   "source-prefix-list"      => "", # a predefined local objects we need these
-                   "destination-prefix-list" => "", # a predefined local objects we need these
+                   "source-prefix-list"      => "", # predefined local object
+                   "destination-prefix-list" => "", # predefined local object
                    # "from"                  => "",
                    "then"                    => "",
                   );
@@ -33,7 +33,7 @@ my %term_atoms = (              # these are field terms we attempt to do
                    "policer"          => "",
                   );
 
-my $filter_name = "test"; # can be overriden from the cmd line
+my $filter_name = "test"; # can be overridden from the cmd line
 
 my @terms      = (); # all of the fw filter terms go in here.
 my $term       = {}; # anonymous hash for pushing into @terms
@@ -179,7 +179,7 @@ sub parseProtocol {
   my ($str) = @_;
   $str =~ s/\[|\]|\;//g; # rip off the chrome
   $str =~ s/^\s+//g;
-  $str =~ s/\s+$//g;     # cleanup whitespace
+  $str =~ s/\s+$//g;     # cleanup white space
 
   my @protocols = split(/\s+/, $str);
   return @protocols;
@@ -191,7 +191,7 @@ sub parsePortBlock {
   my ($str) = @_;
   $str =~ s/\[|\]|\;//g; # rip off the chrome
   $str =~ s/^\s+//g;
-  $str =~ s/\s+$//g;     # cleanup whitespace
+  $str =~ s/\s+$//g;     # cleanup white space
 
   my @ports = split(/\s+/, $str);
 
@@ -224,7 +224,7 @@ sub parseAddrBlock {
 
   foreach my $pref (@addrblock) {
     $pref =~ s/^\s+//g;
-    $pref =~ s/\s+$//g;     # cleanup exteraneous whitespace
+    $pref =~ s/\s+$//g;     # cleanup extraneous white space
     $pref =~ s/\;//g;
     next if ($pref eq "");
 
@@ -245,7 +245,7 @@ sub parseAction {
 
   foreach my $opt ($actions) {
     $opt =~ s/^\s+//g;
-    $opt =~ s/\s+$//g;     # cleanup exteraneous whitespace
+    $opt =~ s/\s+$//g;     # cleanup extraneous white space
     $opt =~ s/\;//g;
 
     $act = "deny" if $opt =~ /discard/i;
@@ -300,7 +300,7 @@ sub parseAclTerm {
 }
 
 # get_bracketed - this is mostly wrapper around the Text::Balanced stuff
-# to faciltate recursing through the ACL term contents.
+# to facilitate recursing through the ACL term contents.
 sub get_bracketed {
   my ($str) = @_;
   my ($prefix, $content, $remainder) = "";
