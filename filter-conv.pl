@@ -145,6 +145,7 @@ sub processTerm {
 
     elsif ($field  =~ /protocol/i ) {
      @protocols = &parseProtocol( $aclref->{$aclname}->{$field} );
+     # print "protocols: $aclref->{$aclname}->{$field} \n";
     }
 
     elsif ($field  =~ /source-port/i )         {
@@ -163,12 +164,30 @@ sub processTerm {
 
   my ($s_p, $d_p) = "";
 
-  foreach my $prot (@protocols) {
-    $s_p = "port-group $s_port_name" if ($src_ports ne "");
-    $d_p = "port-group $d_port_name" if ($dst_ports ne "");
+  # if there's no protocol specified when we process the term, then
+  # we're just creating a standard ACL.  if there's a protocol specified
+  # then we need to build out the extended ACL syntax.
 
-    $acl .= "$action $prot net-group $src_net $s_p net-group $dst_net $d_p" . "\n";
+  #print "no protocol specified - standard ACL ($aclname)\n" if @protocols < 1;
+
+  if (@protocols < 1) {
+    # this is a standard ACL
+    $acl .= "$action net-group $src_net net-group $dst_net" . "\n";
+  } else {
+    foreach my $prot (@protocols) {
+      # all hail tcp || udp
+      if ($prot =~ /(tcp|udp)/i) {
+        $s_p = "port-group $s_port_name" if ($src_ports ne "");
+        $d_p = "port-group $d_port_name" if ($dst_ports ne "");
+
+        $acl .= "$action $prot net-group $src_net $s_p net-group $dst_net $d_p" . "\n";
+      } else {
+        # it's not tcp/udp and requires no port manipulation
+        $acl .= "$action $prot net-group $src_net net-group $dst_net" . "\n";
+      }
+    }
   }
+
   return ($netobj, $portobj, $acl);
 }
 
