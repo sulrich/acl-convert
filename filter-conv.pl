@@ -71,7 +71,7 @@ while (<ACL>) {
     $term_name = $1;
 
   } elsif (( /term (\w\S+)\s+\{/ ) && ($term_cap == 1)) {
-    # we've bumped up against this is the next term for this filter
+    # we've bumped up against the next term for this filter
     #
     # the order of operations is important here!
     push @terms, $term;
@@ -79,9 +79,7 @@ while (<ACL>) {
     $term_name = $1;
   }
 
-  if ($term_cap == 1) {
-    $term->{$term_name} .= $_;
-  }
+  $term->{$term_name} .= $_ if ($term_cap == 1) ;
 }
 push @terms, $term;              # cleanup prior to closing the file.
 close(ACL);
@@ -119,33 +117,33 @@ sub processTerm {
   my ($aclname, $aclref) = @_;
 
   my ($netobj, $portobj, $acl,
-      $src_addr, $src_ports,
-      $dst_addr, $dst_ports,
+      $src_block, $src_ports,  # *_block - used to generate  net-object strings
+      $dst_block, $dst_ports,  # *_port - used to generate net-object
       $action, $counter) = "";
 
   my @protocols      = ();
   my $netobj_prefix  = "object-group network ipv4 ";
   my $portobj_prefix = "object-group port ";
-  my $src_net        = "$aclname-SRC";
-  my $dst_net        = "$aclname-DST";
-  my $s_port_name    = "$aclname-SRC_PORTS";
-  my $d_port_name    = "$aclname-DST_PORTS";
+  my $snet_name     = "$aclname-SRC";
+  my $dnet_name     = "$aclname-DST";
+  my $sport_name    = "$aclname-SRC_PORTS";
+  my $dport_name    = "$aclname-DST_PORTS";
+  my $flag          = "";
 
   foreach my $field (keys %{ $aclref->{$aclname} }  ) {
 
-    if ($field  =~ /destination-address/i ) {
-      my $dst_addr_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
-      $netobj .= $netobj_prefix . "$dst_net\n" . $dst_addr_block . "!\n";
+    if ($field  =~ /source-address/i ) {
+      $src_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
+      $netobj .= $netobj_prefix . "$snet_name\n" . $src_block . "!\n";
     }
 
-    elsif ($field  =~ /source-address/i ) {
-      my $src_addr_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
-      $netobj .= $netobj_prefix . "$src_net\n" . $src_addr_block . "!\n";
+    elsif ($field  =~ /destination-address/i ) {
+      $dst_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
+      $netobj .= $netobj_prefix . "$dnet_name\n" . $dst_block . "!\n";
     }
 
     elsif ($field  =~ /protocol/i ) {
      @protocols = &parseProtocol( $aclref->{$aclname}->{$field} );
-     # print "protocols: $aclref->{$aclname}->{$field} \n";
     }
 
     elsif ($field  =~ /source-port/i )         {
@@ -160,32 +158,57 @@ sub processTerm {
     elsif ($field  =~ /then/i ) {
       $action = &parseAction( $aclref->{$aclname}->{$field} );
     }
+    elsif ($field  =~ /tcp-established/i ) {
+      $flag .= "established";
+    }
+
+
   }
 
-  my ($s_p, $d_p) = "";
+  my ($snet_str, $sport_str,       # (net|port)-string - for output
+      $dnet_str, $dport_str) = "";
+
+  # if we're this far and there's no src/dst addresses set - permit all!
+  # and assume that the protocol stuff is to be the match criteria.
+  if ($src_block eq "") {
+    $snet_str = "any";
+  } else {
+    $snet_str = "net-group $snet_name"
+  }
+
+  if ($dst_block eq "") {
+    $dnet_str = "any";
+  } else {
+    $dnet_str = "net-group $dnet_name"
+  }
 
   # if there's no protocol specified when we process the term, then
   # we're just creating a standard ACL.  if there's a protocol specified
   # then we need to build out the extended ACL syntax.
-
-  #print "no protocol specified - standard ACL ($aclname)\n" if @protocols < 1;
-
-  if (@protocols < 1) {
-    # this is a standard ACL
-    $acl .= "$action net-group $src_net net-group $dst_net" . "\n";
-  } else {
+  if (@protocols >= 1) {
     foreach my $prot (@protocols) {
       # all hail tcp || udp
       if ($prot =~ /(tcp|udp)/i) {
-        $s_p = "port-group $s_port_name" if ($src_ports ne "");
-        $d_p = "port-group $d_port_name" if ($dst_ports ne "");
+        $sport_str = "port-group $sport_name" if ($src_ports ne "");
+        $dport_str = "port-group $dport_name" if ($dst_ports ne "");
 
-        $acl .= "$action $prot net-group $src_net $s_p net-group $dst_net $d_p" . "\n";
-      } else {
-        # it's not tcp/udp and requires no port manipulation
-        $acl .= "$action $prot net-group $src_net net-group $dst_net" . "\n";
+        $acl .= "$action $prot $snet_str $sport_str $dnet_str $dport_str $flag";
+        $acl =~ s/\s+/ /g;            # eliminate 2+ spaces in the output
+        $acl .= "\n";
+
+      } elsif ($prot =~ /icmp/i) {
+        # process icmp-message types
+        my @ilist = &parseIcmpTypes( $aclref->{$aclname}->{'icmp-type'} );
+        foreach my $i (@ilist) {
+          $acl .= "$action $prot $snet_str $dnet_str $i\n";
+          # skipping the scrub of the acl line since it's tightly formed
+        }
       }
     }
+  } else {
+    $acl .= "$action $snet_str $dnet_str $flag";
+    $acl =~ s/\s+/ /g;            # eliminate 2+ spaces in the output
+    $acl .= "\n";
   }
 
   return ($netobj, $portobj, $acl);
@@ -225,6 +248,28 @@ sub parsePortBlock {
     }
   }
   return $portblock;
+}
+
+# parseIcmpTypes - returns an array of icmp-types to generate the ICMP
+# specific list ACL list
+sub parseIcmpTypes {
+  my ($str) = @_;
+  $str =~ s/\[|\]|\;//g; # rip off the chrome
+  $str =~ s/^\s+//g;
+  $str =~ s/\s+$//g;     # cleanup white space
+
+  my @icmptypes = split(/\s+/, $str);
+
+  my @icmplist = ();
+  foreach my $p (@icmptypes) {
+    if ($p =~ /(\d+)\-(\d+)/) {
+      # $portblock .= "  range $1 $2\n";
+      foreach my $i ( $1 .. $2) { push @icmplist, $i; }
+    } else {
+      push @icmplist, $p;
+    }
+  }
+  return @icmplist;
 }
 
 
