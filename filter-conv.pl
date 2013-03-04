@@ -148,12 +148,12 @@ sub processTerm {
 
     elsif ($field  =~ /source-port/i )         {
       $src_ports = &parsePortBlock( $aclref->{$aclname}->{$field} );
-      $portobj .= $portobj_prefix . $aclname . "-SRC\n" . $src_ports . "!\n";
+      $portobj .= $portobj_prefix . $sport_name . "\n" . $src_ports . "!\n";
     }
 
     elsif ($field  =~ /destination-port/i )    {
       $dst_ports = &parsePortBlock( $aclref->{$aclname}->{$field} );
-      $portobj .= $portobj_prefix . $aclname . "-DST\n" . $dst_ports . "!\n";
+      $portobj .= $portobj_prefix . $dport_name . "\n" . $dst_ports . "!\n";
     }
     elsif ($field  =~ /then/i ) {
       $action = &parseAction( $aclref->{$aclname}->{$field} );
