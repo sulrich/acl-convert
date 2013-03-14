@@ -35,14 +35,14 @@ my %term_atoms = (              # these are field terms we attempt to do
 
 my $filter_name = "test"; # can be overridden from the cmd line
 
-my @terms      = (); # all of the fw filter terms go in here.
-my $term       = {}; # anonymous hash for pushing into @terms
-my $term_cap   = 0;  # flag for capturing terms
-my $term_name  = ""; # key for the term
-my $acl_inc    = 10; # amount to increment ACL line #s by
+my @terms      = ();            # all of the fw filter terms go in here.
+my $term       = {};            # anonymous hash for pushing into @terms
+my $term_cap   = 0;             # flag for capturing terms
+my $term_name  = "";            # key for the term
+my $acl_inc    = 10;            # amount to increment ACL line #s by
 my $o_net_objs = "";
 my $o_port_obj = "";
-my $o_acl      = "";  # the actual output
+my $o_acl      = "";            # the actual output
 
 &GetOptions('f=s' => \$filter_name );
 
@@ -75,13 +75,13 @@ while (<ACL>) {
     #
     # the order of operations is important here!
     push @terms, $term;
-    $term      = {};                  # reset this value
+    $term      = {};            # reset this value
     $term_name = $1;
   }
 
   $term->{$term_name} .= $_ if ($term_cap == 1) ;
 }
-push @terms, $term;              # cleanup prior to closing the file.
+push @terms, $term;             # cleanup prior to closing the file.
 close(ACL);
 
 # iterate through the various terms we've pulled in and assemble the ACL
@@ -97,14 +97,13 @@ foreach my $i (0 .. $#terms) {       # handle terms in order
   }
 }
 
-$o_acl = &number_acl($o_acl); # add line numbers
+$o_acl = &number_acl($o_acl);   # add line numbers to the output
 
-# iterate through the various terms we've pulled in and assemble the ACL
+# actually output the ACL
 # ==============================================================================
 print $o_net_objs;
 print $o_port_objs;
 print "ipv4 access-list $filter_name\n" . $o_acl . "!\n";
-
 
 
 # processTerm - iterates through the ACL structure passed to it and
@@ -117,29 +116,37 @@ sub processTerm {
   my ($aclname, $aclref) = @_;
 
   my ($netobj, $portobj, $acl,
-      $src_block, $src_ports,  # *_block - used to generate  net-object strings
-      $dst_block, $dst_ports,  # *_port - used to generate net-object
+      $src_block, $src_ports, $src_excpt,
+      $dst_block, $dst_ports, $dst_excpt,
       $action, $counter) = "";
 
   my @protocols      = ();
   my $netobj_prefix  = "object-group network ipv4 ";
   my $portobj_prefix = "object-group port ";
-  my $snet_name     = "$aclname-SRC";
-  my $dnet_name     = "$aclname-DST";
-  my $sport_name    = "$aclname-SRC_PORTS";
-  my $dport_name    = "$aclname-DST_PORTS";
-  my $flag          = "";
+  my $snet_name      = "$aclname-SRC";
+  my $dnet_name      = "$aclname-DST";
+  my $sport_name     = "$aclname-SRC_PORTS";
+  my $dport_name     = "$aclname-DST_PORTS";
+  my $flag           = "";
 
   foreach my $field (keys %{ $aclref->{$aclname} }  ) {
 
     if ($field  =~ /source-address/i ) {
-      $src_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
+      ($src_block, $src_excpt) = &parseAddrBlock( $aclref->{$aclname}->{$field} );
       $netobj .= $netobj_prefix . "$snet_name\n" . $src_block . "!\n";
+      if ($src_excpt ne "") {
+        $netobj .= $netobj_prefix . "$snet_name-EXCPT\n" . $src_excpt . "!\n";
+        print "src exceptions -- $snet_name\n" . $src_excpt. "!\n";
+      }
     }
 
     elsif ($field  =~ /destination-address/i ) {
-      $dst_block = &parseAddrBlock( $aclref->{$aclname}->{$field} );
+      ($dst_block, $dst_excpt) = &parseAddrBlock( $aclref->{$aclname}->{$field} );
       $netobj .= $netobj_prefix . "$dnet_name\n" . $dst_block . "!\n";
+      if ($dst_excpt ne "") {
+        $netobj .= $netobj_prefix . "$dnet_name-EXCPT\n" . $dst_excpt . "!\n";
+        print "dst exceptions -- $dnet_name\n" . $dst_excpt. "!\n";
+      }
     }
 
     elsif ($field  =~ /protocol/i ) {
@@ -161,11 +168,9 @@ sub processTerm {
     elsif ($field  =~ /tcp-established/i ) {
       $flag .= "established";
     }
-
-
   }
 
-  my ($snet_str, $sport_str,       # (net|port)-string - for output
+  my ($snet_str, $sport_str,    # (net|port)-string - for output
       $dnet_str, $dport_str) = "";
 
   # if we're this far and there's no src/dst addresses set - permit all!
@@ -182,6 +187,7 @@ sub processTerm {
     $dnet_str = "net-group $dnet_name"
   }
 
+
   # if there's no protocol specified when we process the term, then
   # we're just creating a standard ACL.  if there's a protocol specified
   # then we need to build out the extended ACL syntax.
@@ -193,7 +199,7 @@ sub processTerm {
         $dport_str = "port-group $dport_name" if ($dst_ports ne "");
 
         $acl .= "$action $prot $snet_str $sport_str $dnet_str $dport_str $flag";
-        $acl =~ s/\s+/ /g;            # eliminate 2+ spaces in the output
+        $acl =~ s/\s+/ /g;      # eliminate 2+ spaces in the output
         $acl .= "\n";
 
       } elsif ($prot =~ /icmp/i) {
@@ -207,7 +213,7 @@ sub processTerm {
     }
   } else {
     $acl .= "$action $snet_str $dnet_str $flag";
-    $acl =~ s/\s+/ /g;            # eliminate 2+ spaces in the output
+    $acl =~ s/\s+/ /g;          # eliminate 2+ spaces in the output
     $acl .= "\n";
   }
 
@@ -219,9 +225,9 @@ sub processTerm {
 # iterate through when building the acl.
 sub parseProtocol {
   my ($str) = @_;
-  $str =~ s/\[|\]|\;//g; # rip off the chrome
+  $str =~ s/\[|\]|\;//g;        # rip off the chrome
   $str =~ s/^\s+//g;
-  $str =~ s/\s+$//g;     # cleanup white space
+  $str =~ s/\s+$//g;            # cleanup white space
 
   my @protocols = split(/\s+/, $str);
   return @protocols;
@@ -231,9 +237,9 @@ sub parseProtocol {
 # and eq statements as necessary.
 sub parsePortBlock {
   my ($str) = @_;
-  $str =~ s/\[|\]|\;//g; # rip off the chrome
+  $str =~ s/\[|\]|\;//g;        # rip off the chrome
   $str =~ s/^\s+//g;
-  $str =~ s/\s+$//g;     # cleanup white space
+  $str =~ s/\s+$//g;            # cleanup white space
 
   my @ports = split(/\s+/, $str);
 
@@ -254,9 +260,9 @@ sub parsePortBlock {
 # specific list ACL list
 sub parseIcmpTypes {
   my ($str) = @_;
-  $str =~ s/\[|\]|\;//g; # rip off the chrome
+  $str =~ s/\[|\]|\;//g;        # rip off the chrome
   $str =~ s/^\s+//g;
-  $str =~ s/\s+$//g;     # cleanup white space
+  $str =~ s/\s+$//g;            # cleanup white space
 
   my @icmptypes = split(/\s+/, $str);
 
@@ -277,25 +283,26 @@ sub parseIcmpTypes {
 # it doesn't do anything particularly clever wrt the juniper 'except'
 # statements.
 #
-# XXX - what to do about the except operations?  does it make sense to
-# parse these and optimize them within the context of the network
-# object-group?
 sub parseAddrBlock {
   my ($addrs) = @_;
-  my $block = "";
+  my ($block, $except) = "";
 
   my @addrblock = split(/\n/, $addrs);
 
   foreach my $pref (@addrblock) {
     $pref =~ s/^\s+//g;
-    $pref =~ s/\s+$//g;     # cleanup extraneous white space
+    $pref =~ s/\s+$//g;         # cleanup extraneous white space
     $pref =~ s/\;//g;
     next if ($pref eq "");
 
-    $pref   = "!! $pref" if ( $pref =~ /except/i ); # oh what to do about exceptions...?
-    $block .= "  $pref\n";
+    if ($pref !~ /except/) {
+      $block .= "  $pref\n";
+    } else {
+      $pref   =~ s/except//g;
+      $except .= "  $pref\n";
+    }
   }
-  return $block;
+  return($block, $except);
 }
 
 # parse the 'then' component of the junos term - there's room for a lot
@@ -305,11 +312,11 @@ sub parseAddrBlock {
 # XXX - i need to add more handling for counters, forwarding class, etc.
 sub parseAction {
   my ($actions) = @_;
-  my $act = "permit";
+  my $act = "permit";           # seems like a reasonable place to start
 
   foreach my $opt ($actions) {
     $opt =~ s/^\s+//g;
-    $opt =~ s/\s+$//g;     # cleanup extraneous white space
+    $opt =~ s/\s+$//g;          # cleanup extraneous white space
     $opt =~ s/\;//g;
 
     $act = "deny" if $opt =~ /discard/i;
@@ -356,7 +363,7 @@ sub parseAclTerm {
     }
 
     if ( exists $term_fields{$pref} ) {
-      $val =~ s/\{|\}//g;           # strip brackets
+      $val =~ s/\{|\}//g;       # strip brackets
       $acl->{$name}{$pref} = $val;
     }
   }
