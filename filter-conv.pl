@@ -29,8 +29,8 @@ my %term_atoms = (              # these are field terms we attempt to do
                    "tcp-established"  => "",
                    "packet-length"    => "",
                    "icmp-type"        => "",
-                   "fragment-offset"  => "",
-                   "policer"          => "",
+                  # "fragment-offset"  => "",
+                  # "policer"          => "",
                   );
 
 my $filter_name = "test"; # can be overridden from the cmd line
@@ -88,6 +88,7 @@ close(ACL);
 # ==============================================================================
 foreach my $i (0 .. $#terms) {       # handle terms in order
   foreach my $j (keys %{ $terms[$i] } ) {
+    # $acl_struct (HoH with the parsed fields in keys)
     my $acl_struct               = &parseAclTerm( $j, $terms[$i]{$j} );
     my ($netobj, $portobj, $acl) = &processTerm( $j, $acl_struct );
 
@@ -97,7 +98,7 @@ foreach my $i (0 .. $#terms) {       # handle terms in order
   }
 }
 
-$o_acl = &number_acl($o_acl);   # add line numbers to the output
+$o_acl = &number_acl($o_acl, $acl_inc);   # add line numbers to the output
 
 # actually output the ACL
 # ==============================================================================
@@ -120,104 +121,117 @@ sub processTerm {
       $dst_block, $dst_ports, $dst_excpt,
       $action, $counter) = "";
 
-  my @protocols      = ();
   my $netobj_prefix  = "object-group network ipv4 ";
   my $portobj_prefix = "object-group port ";
-  my $snet_name      = "$aclname-SRC";
-  my $dnet_name      = "$aclname-DST";
-  my $sport_name     = "$aclname-SRC_PORTS";
-  my $dport_name     = "$aclname-DST_PORTS";
-  my $flag           = "";
+
+  my %term = (
+              sport_name => "$aclname-SRC_PORTS",
+              dport_name => "$aclname-DST_PORTS",
+              snet_name  => "$aclname-SRC",
+              snet_xname => "$aclname-EXCPT",
+              dnet_name  => "$aclname-DST",
+              dnet_xname => "$aclname-EXCPT",
+              flag       => "",
+             );
 
   foreach my $field (keys %{ $aclref->{$aclname} }  ) {
 
-    if ($field  =~ /source-address/i ) {
-      ($src_block, $src_excpt) = &parseAddrBlock( $aclref->{$aclname}->{$field} );
-      $netobj .= $netobj_prefix . "$snet_name\n" . $src_block . "!\n";
-      if ($src_excpt ne "") {
-        $netobj .= $netobj_prefix . "$snet_name-EXCPT\n" . $src_excpt . "!\n";
-        print "src exceptions -- $snet_name\n" . $src_excpt. "!\n";
+
+    if ( $field  =~ /source-address/i ) {
+      ($term{'src_block'}, $term{'src_excpt'}) = &parseAddrBlock( $aclref->{$aclname}->{$field} );
+      $netobj .= $netobj_prefix . "$term{'snet_name'}\n" . $term{'src_block'} . "!\n";
+      if ($term{'src_excpt'} ne "") {
+        $netobj .= $netobj_prefix . "$term{'snet_xname'}\n" . $term{'src_excpt'} . "!\n";
+        print "src exceptions -- $term{'snet_xname'}\n" . $term{'src_excpt'}. "!\n";
       }
     }
-
     elsif ($field  =~ /destination-address/i ) {
-      ($dst_block, $dst_excpt) = &parseAddrBlock( $aclref->{$aclname}->{$field} );
-      $netobj .= $netobj_prefix . "$dnet_name\n" . $dst_block . "!\n";
-      if ($dst_excpt ne "") {
-        $netobj .= $netobj_prefix . "$dnet_name-EXCPT\n" . $dst_excpt . "!\n";
-        print "dst exceptions -- $dnet_name\n" . $dst_excpt. "!\n";
+      ($term{'dst_block'}, $term{'dst_excpt'}) = &parseAddrBlock( $aclref->{$aclname}->{$field} );
+      $netobj .= $netobj_prefix . "$term{'dnet_name'}\n" . $term{'dst_block'} . "!\n";
+      if ($term{'dst_excpt'} ne "") {
+        $netobj .= $netobj_prefix . "$term{'dnet_xname'}\n" . $term{'dst_excpt'} . "!\n";
+        print "dst exceptions -- $term{'dnet_xname'}\n" . $term{'dst_excpt'}. "!\n";
       }
     }
-
-    elsif ($field  =~ /protocol/i ) {
-     @protocols = &parseProtocol( $aclref->{$aclname}->{$field} );
-    }
-
     elsif ($field  =~ /source-port/i )         {
-      $src_ports = &parsePortBlock( $aclref->{$aclname}->{$field} );
-      $portobj .= $portobj_prefix . $sport_name . "\n" . $src_ports . "!\n";
+      $term{'src_ports'} = &parsePortBlock( $aclref->{$aclname}->{$field} );
+      $portobj .= $portobj_prefix . $term{'sport_name'} . "\n" . $term{'src_ports'} . "!\n";
     }
-
     elsif ($field  =~ /destination-port/i )    {
-      $dst_ports = &parsePortBlock( $aclref->{$aclname}->{$field} );
-      $portobj .= $portobj_prefix . $dport_name . "\n" . $dst_ports . "!\n";
+      $term{'dst_ports'} = &parsePortBlock( $aclref->{$aclname}->{$field} );
+      $portobj .= $portobj_prefix . $term{'dport_name'} . "\n" . $term{'dst_ports'} . "!\n";
+    }
+    elsif ($field  =~ /protocol/i ) {
+      my @protocols = &parseProtocol( $aclref->{$aclname}->{$field} );
+      $term{'protocols'} = [ @protocols ];
     }
     elsif ($field  =~ /then/i ) {
-      $action = &parseAction( $aclref->{$aclname}->{$field} );
+      $term{'action'} = &parseAction( $aclref->{$aclname}->{$field} );
     }
     elsif ($field  =~ /tcp-established/i ) {
-      $flag .= "established";
+      $term{'flag'} .= "established";
     }
   }
 
+
+  my $ace = generateACE(%term);
+  return ($netobj, $portobj, $ace);
+}
+
+
+sub generateACE {
+  my (%te) = @_;                # hash of all of the ACE elements
+
   my ($snet_str, $sport_str,    # (net|port)-string - for output
-      $dnet_str, $dport_str) = "";
+      $dnet_str, $dport_str,
+      $ace,
+     ) = "";
 
   # if we're this far and there's no src/dst addresses set - permit all!
   # and assume that the protocol stuff is to be the match criteria.
-  if ($src_block eq "") {
+  if ($te{'src_block'} eq "") {
     $snet_str = "any";
   } else {
-    $snet_str = "net-group $snet_name"
+    $snet_str = "net-group $te{snet_name}"
   }
 
-  if ($dst_block eq "") {
+  if ($te{'dst_block'} eq "") {
     $dnet_str = "any";
   } else {
-    $dnet_str = "net-group $dnet_name"
+    $dnet_str = "net-group $te{dnet_name}"
   }
 
 
   # if there's no protocol specified when we process the term, then
   # we're just creating a standard ACL.  if there's a protocol specified
   # then we need to build out the extended ACL syntax.
-  if (@protocols >= 1) {
-    foreach my $prot (@protocols) {
+  if ( @{ $te{protocols} } >= 1) {
+    foreach my $prot ( @{ $te{'protocols'} } ) {
       # all hail tcp || udp
       if ($prot =~ /(tcp|udp)/i) {
-        $sport_str = "port-group $sport_name" if ($src_ports ne "");
-        $dport_str = "port-group $dport_name" if ($dst_ports ne "");
+        $sport_str = "port-group $te{'sport_name'}" if ($te{'src_ports'} ne "");
+        $dport_str = "port-group $te{'dport_name'}" if ($te{'dst_ports'} ne "");
 
-        $acl .= "$action $prot $snet_str $sport_str $dnet_str $dport_str $flag";
-        $acl =~ s/\s+/ /g;      # eliminate 2+ spaces in the output
-        $acl .= "\n";
+        $ace .= "$te{action} $prot $snet_str $sport_str $dnet_str $dport_str $te{flag}";
+        $ace =~ s/\s+/ /g;          # eliminate 2+ spaces in the output
+        $ace .= "\n";
 
       } elsif ($prot =~ /icmp/i) {
         # process icmp-message types
         my @ilist = &parseIcmpTypes( $aclref->{$aclname}->{'icmp-type'} );
         foreach my $i (@ilist) {
-          $acl .= "$action $prot $snet_str $dnet_str $i\n";
+          $ace .= "$te{action} $prot $snet_str $dnet_str $i\n";
           # skipping the scrub of the acl line since it's tightly formed
         }
       }
     }
   } else {
-    $acl .= "$action $snet_str $dnet_str $flag";
-    $acl =~ s/\s+/ /g;          # eliminate 2+ spaces in the output
-    $acl .= "\n";
+    $ace .= "$te{action} $snet_str $dnet_str $te{flag}";
+    $ace =~ s/\s+/ /g;          # eliminate 2+ spaces in the output
+    $ace .= "\n";
   }
 
-  return ($netobj, $portobj, $acl);
+  return $ace;
 }
 
 
@@ -299,7 +313,7 @@ sub parseAddrBlock {
       $block .= "  $pref\n";
     } else {
       $pref   =~ s/except//g;
-      $except .= "  $pref\n";
+      $except .= "  $pref ! except prefix\n";
     }
   }
   return($block, $except);
@@ -324,8 +338,6 @@ sub parseAction {
 
   return $act;
 }
-
-
 
 
 # ---------------------------------------------------------------------
@@ -392,15 +404,16 @@ sub get_bracketed {
 
 # stick line numbers on the front of the ACL.
 sub number_acl {
-  my ($acl) = @_;
+  my ($acl, $inc) = @_;
   my $o = "";
-  my $lnum = $acl_inc;
+  my $lnum = $inc;
 
   my @lines = split (/\n/, $acl);
   foreach my $l (@lines) {
     $o .= "  $lnum $l\n";
-    $lnum = $lnum + $acl_inc
+    $lnum = $lnum + $inc
   }
+
   return $o;
 };
 
