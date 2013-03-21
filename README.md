@@ -5,7 +5,9 @@ this is a hack of a script to convert junos filters to IOSXR.  this is pretty cr
 
 ## 'except' keyword handling
 
-juniper has the notion of an ACL ```except``` keyword which allows you to pull a more specific prefix out of the terms above. this in turn applies the appropriate inversion for the logic applied for the term overall.  i don't do anything intelligent with 'except' keywords .  this needs to get busted out separately.
+juniper has the notion of an ACL ```except``` keyword which allows you to pull a more specific prefix out of the terms above. this in turn applies the appropriate inversion for the logic applied for the term overall.
+
+the conversion script will now (naively) prepend the excepted prefixes from the original juniper term and invert the action for these prefixes.  it will handle the src/dst processing appropriately.  honestly, i haven't examined the implications of this behavior in detail.  but for most cases it should do the right thing.
 
 ## config parsing anomalies
 
