@@ -51,13 +51,6 @@ if (!$ARGV[0]) {
   exit(1);
 }
 
-# standard format for the translated objects is:
-#
-# -  object-group network ipv4 TERM_NAME-SRC/DST
-# -  object-group port TERM_NAME-SRC/DST
-#
-# junos filter name will result in the same acl name on the IOS XR side
-
 open(ACL, $ARGV[0]) || die "error opening: $ARGV[0]";
 while (<ACL>) {
   if (/filter (\w\S+)\s+\{/i) {
@@ -136,13 +129,11 @@ sub processTerm {
 
   foreach my $field (keys %{ $aclref->{$aclname} }  ) {
 
-
     if ( $field  =~ /source-address/i ) {
       ($term{'src_block'}, $term{'src_excpt'}) = &parseAddrBlock( $aclref->{$aclname}->{$field} );
       $netobj .= $netobj_prefix . "$term{'snet_name'}\n" . $term{'src_block'} . "!\n";
       if ($term{'src_excpt'} ne "") {
         $netobj .= $netobj_prefix . "$term{'snet_xname'}\n" . $term{'src_excpt'} . "!\n";
-        print "src exceptions -- $term{'snet_xname'}\n" . $term{'src_excpt'}. "!\n";
       }
     }
     elsif ($field  =~ /destination-address/i ) {
@@ -150,7 +141,6 @@ sub processTerm {
       $netobj .= $netobj_prefix . "$term{'dnet_name'}\n" . $term{'dst_block'} . "!\n";
       if ($term{'dst_excpt'} ne "") {
         $netobj .= $netobj_prefix . "$term{'dnet_xname'}\n" . $term{'dst_excpt'} . "!\n";
-        print "dst exceptions -- $term{'dnet_xname'}\n" . $term{'dst_excpt'}. "!\n";
       }
     }
     elsif ($field  =~ /source-port/i )         {
@@ -173,7 +163,6 @@ sub processTerm {
     }
   }
 
-
   my $ace = generateACE(%term);
   return ($netobj, $portobj, $ace);
 }
@@ -182,51 +171,89 @@ sub processTerm {
 sub generateACE {
   my (%te) = @_;                # hash of all of the ACE elements
 
-  my ($snet_str, $sport_str,    # (net|port)-string - for output
-      $dnet_str, $dport_str,
-      $ace,
-     ) = "";
+  my $ace = "";
 
   # if we're this far and there's no src/dst addresses set - permit all!
   # and assume that the protocol stuff is to be the match criteria.
   if ($te{'src_block'} eq "") {
-    $snet_str = "any";
-  } else {
-    $snet_str = "net-group $te{snet_name}"
+    $te{snet_str} = "any";
   }
+  else { $te{snet_str} = "net-group $te{snet_name}"; }
 
   if ($te{'dst_block'} eq "") {
-    $dnet_str = "any";
-  } else {
-    $dnet_str = "net-group $te{dnet_name}"
+    $te{dnet_str} = "any";
+  }
+  else { $te{dnet_str} = "net-group $te{dnet_name}"; }
+
+  # step through the exception handling options
+  if ( ($te{src_excpt} ne "") && ($te{dst_excpt} ne "") ) {
+    # use exception src_addrs and dest_addrs
+    $ace .= "REMARK -- START :: TERM CONTAINING EXCEPTION PROCESSING ---\n";
+    $ace .= generateAceProtocols(\%te,
+                                 "net-group $te{snet_xname}",
+                                 "net-group $te{dnet_xname}",
+                                 &invertAction($te{action}));
+    $ace .= generateAceProtocols(\%te, $te{snet_str}, $te{dnet_str}, $te{action});
+    $ace .= "REMARK -- END :: TERM CONTAINING EXCEPTION PROCESSING ---\n";
+  }
+  elsif ( ($te{src_excpt} ne "") && ($te{dst_excpt} eq "")) {
+    # use exception src_addrs and term dest_addrs
+    $ace .= "REMARK -- START :: TERM CONTAINING EXCEPTION PROCESSING ---\n";
+    $ace .= generateAceProtocols(\%te,
+                                 "net-group $te{snet_xname}",
+                                 $te{dnet_str},
+                                 &invertAction($te{action}));
+    $ace .= generateAceProtocols(\%te, $te{snet_str}, $te{dnet_str}, $te{action});
+    $ace .= "REMARK -- END :: TERM CONTAINING EXCEPTION PROCESSING ---\n";
+  }
+  elsif ( ($te{src_excpt} eq "") && ($te{dst_excpt} ne "")) {
+    # use term src_addrs and exception destination
+    $ace .= "REMARK -- START :: TERM CONTAINING EXCEPTION PROCESSING ---\n";
+    $ace .= generateAceProtocols(\%te,
+                                 $te{snet_str},
+                                 "net-group $te{dnet_xname}",
+                                 &invertAction($te{action}));
+    $ace .= generateAceProtocols(\%te, $te{snet_str}, $te{dnet_str}, $te{action});
+    $ace .= "REMARK -- END :: TERM CONTAINING EXCEPTION PROCESSING ---\n";
+  }
+  else {
+    # there are no exception addresses to handle
+    $ace .= generateAceProtocols(\%te, $te{snet_str}, $te{dnet_str}, $te{action});
   }
 
+  return $ace;
+
+}
+
+sub generateAceProtocols {
+  my ($te, $snet_str, $dnet_str, $action) = @_;
+  my $ace = "";
 
   # if there's no protocol specified when we process the term, then
   # we're just creating a standard ACL.  if there's a protocol specified
   # then we need to build out the extended ACL syntax.
-  if ( @{ $te{protocols} } >= 1) {
-    foreach my $prot ( @{ $te{'protocols'} } ) {
-      # all hail tcp || udp
+  if ( @{ $te->{protocols} } >= 1 ) {
+    foreach my $prot ( @{ $te->{'protocols'} } ) {
       if ($prot =~ /(tcp|udp)/i) {
-        $sport_str = "port-group $te{'sport_name'}" if ($te{'src_ports'} ne "");
-        $dport_str = "port-group $te{'dport_name'}" if ($te{'dst_ports'} ne "");
+        # all hail tcp || udp
+        $sport_str = "port-group $te->{'sport_name'}" if ($te->{'src_ports'} ne "");
+        $dport_str = "port-group $te->{'dport_name'}" if ($te->{'dst_ports'} ne "");
 
-        $ace .= "$te{action} $prot $snet_str $sport_str $dnet_str $dport_str $te{flag}";
-        $ace =~ s/\s+/ /g;          # eliminate 2+ spaces in the output
+        $ace .= "$action $prot $snet_str $sport_str $dnet_str $dport_str $te{flag}";
+        $ace =~ s/\s+/ /g;      # eliminate 2+ spaces in the output
         $ace .= "\n";
 
       } elsif ($prot =~ /icmp/i) {
         # process icmp-message types
         my @ilist = &parseIcmpTypes( $aclref->{$aclname}->{'icmp-type'} );
         foreach my $i (@ilist) {
-          $ace .= "$te{action} $prot $snet_str $dnet_str $i\n";
+          $ace .= "$action $prot $snet_str $dnet_str $i\n";
           # skipping the scrub of the acl line since it's tightly formed
         }
       }
     }
   } else {
-    $ace .= "$te{action} $snet_str $dnet_str $te{flag}";
+    $ace .= "$action $snet_str $dnet_str $te{flag}";
     $ace =~ s/\s+/ /g;          # eliminate 2+ spaces in the output
     $ace .= "\n";
   }
@@ -313,7 +340,7 @@ sub parseAddrBlock {
       $block .= "  $pref\n";
     } else {
       $pref   =~ s/except//g;
-      $except .= "  $pref ! except prefix\n";
+      $except .= "  $pref\n";
     }
   }
   return($block, $except);
@@ -401,6 +428,14 @@ sub get_bracketed {
   return($prefix, $content, $remainder);
 
 }
+
+sub invertAction {
+  my ($action) = @_;
+
+  return "deny"   if ($action =~ /permit/i);
+  return "permit" if ($action =~ /deny/i  );
+}
+
 
 # stick line numbers on the front of the ACL.
 sub number_acl {
