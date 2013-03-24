@@ -11,34 +11,34 @@ use Text::Balanced qw( extract_bracketed );
 
 my %term_fields = (             # bracketed term fields
                    "destination-address"     => "",
+                   "destination-prefix-list" => "", # predefined local object
+                   "from"                    => "",
                    "source-address"          => "",
                    "source-prefix-list"      => "", # predefined local object
-                   "destination-prefix-list" => "", # predefined local object
-                   # "from"                  => "",
                    "then"                    => "",
                   );
 
 my %term_atoms = (              # these are field terms we attempt to do
                                 # something reasonable with
-                  "protocol"                  => "",
-                  "destination-port"          => "",
-                  "source-port"               => "",
-                  "forwarding-class"          => "",
-                  "count"                     => "",
                   "accept"                    => "",
-                  "tcp-established"           => "",
-                  "packet-length"             => "",
+                  "destination-port"          => "",
                   "icmp-type"                 => "",
-                  "fragment-offset"           => "",
-                  "policer"                   => "",
-                  "first-fragment"            => "",
-                  "is-fragment"               => "",
+                  "protocol"                  => "",
+                  "source-port"               => "",
+                  "tcp-established"           => "",
+                  # "count"                     => "",
+                  # "first-fragment"            => "",
+                  # "forwarding-class"          => "",
+                  # "fragment-offset"           => "",
+                  # "is-fragment"               => "",
+                  # "packet-length"             => "",
+                  # "policer"                   => "",
                                 # the following are local objects
-                  "configured-neighbors-only" => "",
-                  "ipv4-local-interfaces"     => "",
+                  # "configured-neighbors-only" => "",
+                  # "ipv4-local-interfaces"     => "",
                  );
 
-my $filter_name = "test"; # can be overridden from the cmd line
+my $filter_name = "test";       # can be overridden from the cmd line
 
 my @terms      = ();            # all of the fw filter terms go in here.
 my $term       = {};            # anonymous hash for pushing into @terms
@@ -114,10 +114,7 @@ print "ipv4 access-list $filter_name\n" . $o_acl . "!\n";
 sub processTerm {
   my ($aclname, $aclref) = @_;
 
-  my ($netobj, $portobj, $acl,
-      $src_block, $src_ports, $src_excpt,
-      $dst_block, $dst_ports, $dst_excpt,
-      $action, $counter) = "";
+  my ($netobj, $portobj) = "";
 
   my $netobj_prefix  = "object-group network ipv4 ";
   my $portobj_prefix = "object-group port ";
@@ -129,6 +126,7 @@ sub processTerm {
               snet_xname => "$aclname-EXCPT",
               dnet_name  => "$aclname-DST",
               dnet_xname => "$aclname-EXCPT",
+              action     => "",
               flag       => "",
              );
 
@@ -182,13 +180,11 @@ sub generateACE {
   # and assume that the protocol stuff is to be the match criteria.
   if ($te{'src_block'} eq "") {
     $te{snet_str} = "any";
-  }
-  else { $te{snet_str} = "net-group $te{snet_name}"; }
+  } else { $te{snet_str} = "net-group $te{snet_name}"; }
 
   if ($te{'dst_block'} eq "") {
     $te{dnet_str} = "any";
-  }
-  else { $te{dnet_str} = "net-group $te{dnet_name}"; }
+  } else { $te{dnet_str} = "net-group $te{dnet_name}"; }
 
   # step through the exception handling options
   if ( ($te{src_excpt} ne "") && ($te{dst_excpt} ne "") ) {
@@ -227,7 +223,6 @@ sub generateACE {
   }
 
   return $ace;
-
 }
 
 sub generateAceProtocols {
@@ -403,18 +398,17 @@ sub parseAclTerm {
           if (exists $term_atoms{$1} ) {
             $acl->{$name}{$1} = $2;
           } else {
-            print "!! ERROR: new atom ($1 - $2)\n";
+            print "!! ERROR: unrecognized atom ($1: $2) - term: $name\n";
           }
         }
         elsif ( $l =~ /\b([\-\w]+)\;/gci ) {     # single elements
           if (exists $term_atoms{$1} ) {
             $acl->{$name}{$1} = "";
           } else {
-            print "!! ERROR: new atom ($1)\n";
+            print "!! ERROR: unrecognized atom ($1) - term: $name\n";
           }
         }
       }
-
     }  # end of parsing from {} terms
 
     if ( exists $term_fields{$pref} ) {
