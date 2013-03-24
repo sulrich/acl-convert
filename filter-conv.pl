@@ -20,18 +20,23 @@ my %term_fields = (             # bracketed term fields
 
 my %term_atoms = (              # these are field terms we attempt to do
                                 # something reasonable with
-                   "protocol"         => "",
-                   "destination-port" => "",
-                   "source-port"      => "",
-                   "forwarding-class" => "",
-                   "count"            => "",
-                   "accept"           => "",
-                   "tcp-established"  => "",
-                   "packet-length"    => "",
-                   "icmp-type"        => "",
-                  # "fragment-offset"  => "",
-                  # "policer"          => "",
-                  );
+                  "protocol"                  => "",
+                  "destination-port"          => "",
+                  "source-port"               => "",
+                  "forwarding-class"          => "",
+                  "count"                     => "",
+                  "accept"                    => "",
+                  "tcp-established"           => "",
+                  "packet-length"             => "",
+                  "icmp-type"                 => "",
+                  "fragment-offset"           => "",
+                  "policer"                   => "",
+                  "first-fragment"            => "",
+                  "is-fragment"               => "",
+                                # the following are local objects
+                  "configured-neighbors-only" => "",
+                  "ipv4-local-interfaces"     => "",
+                 );
 
 my $filter_name = "test"; # can be overridden from the cmd line
 
@@ -391,15 +396,26 @@ sub parseAclTerm {
       # c - continue
       # i - case insensitive
       # g - global
-      while ( $val =~ /\b([\-\w]+)\s+(.+)\;/gci ) { # we only want "words" here
-        if (exists $term_atoms{$1} ) {
-          $acl->{$name}{$1} = $2;
-        } else {
-          next if $2 =~ /except/;  # junos' "except" is a slick, except for here
-          print "!! ERROR: new atom ($1 - $2)\n";
+
+      foreach my $l (split /\n/, $val) {
+        next if $l =~ /\d{1,3}\.\d{1,3}/;        # skip ip addresses
+        if ( $l =~ /\b([\-\w]+)\s+(.+)\;/gci ) { # we only want "words" here
+          if (exists $term_atoms{$1} ) {
+            $acl->{$name}{$1} = $2;
+          } else {
+            print "!! ERROR: new atom ($1 - $2)\n";
+          }
+        }
+        elsif ( $l =~ /\b([\-\w]+)\;/gci ) {     # single elements
+          if (exists $term_atoms{$1} ) {
+            $acl->{$name}{$1} = "";
+          } else {
+            print "!! ERROR: new atom ($1)\n";
+          }
         }
       }
-    }
+
+    }  # end of parsing from {} terms
 
     if ( exists $term_fields{$pref} ) {
       $val =~ s/\{|\}//g;       # strip brackets
