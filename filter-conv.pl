@@ -331,6 +331,8 @@ sub parseAddrBlock {
   my @addrblock = split(/\n/, $addrs);
 
   foreach my $pref (@addrblock) {
+    next if ($pref =~ /^\s+\#/);
+
     $pref =~ s/^\s+//g;
     $pref =~ s/\s+$//g;         # cleanup extraneous white space
     $pref =~ s/\;//g;
